@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO.Ports;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace SerialDebugger
 {
@@ -33,11 +34,8 @@ namespace SerialDebugger
         [JsonPropertyName("newLine")] public string NewLineConf { get; set; } = "LF";
         [JsonPropertyName("autoBreak")] public int AutoBreakConf { get; set; } = 1000;
 
-        private static readonly JsonSerializerOptions JsonOpts = new()
-        {
-            WriteIndented = true,
-            PropertyNameCaseInsensitive = true,
-        };
+        private static readonly JsonTypeInfo<AppSettings> JsonTypeInfo =
+            AppSettingsJsonContext.Default.AppSettings;
 
         public static string FilePath
         {
@@ -60,7 +58,7 @@ namespace SerialDebugger
                 if (File.Exists(path))
                 {
                     string json = File.ReadAllText(path);
-                    settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOpts) ?? new AppSettings();
+                    settings = JsonSerializer.Deserialize(json, JsonTypeInfo) ?? new AppSettings();
                 }
                 else
                 {
@@ -122,11 +120,15 @@ namespace SerialDebugger
         {
             string path = FilePath;
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, JsonSerializer.Serialize(this, JsonOpts));
+            File.WriteAllText(path, JsonSerializer.Serialize(this, JsonTypeInfo));
             Debug.Print($"Stored app settings to {path}: portName={PortNameConf}, baudRate={BaudRateConf}, dataBits={DataBitsConf}, parity={ParityConf}, stopBits={StopBitsConf}, textEncoding={TextEncodingConf}, newLine={NewLineConf}, autoBreak={AutoBreakConf}");
         }
 
         private static int ParseIntOrZero(string? s) =>
             int.TryParse(s, out int v) ? v : 0;
     }
+
+    [JsonSourceGenerationOptions(WriteIndented = true, PropertyNameCaseInsensitive = true)]
+    [JsonSerializable(typeof(AppSettings))]
+    internal sealed partial class AppSettingsJsonContext : JsonSerializerContext { }
 }
