@@ -13,7 +13,12 @@
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>partial</TrimMode>
     <_SuppressWinFormsTrimError>true</_SuppressWinFormsTrimError>
+    <CustomResourceTypesSupport>true</CustomResourceTypesSupport>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <TrimmerRootAssembly Include="System.Resources.Extensions" />
+  </ItemGroup>
 
   <ItemGroup>
     <Content Include="download\app.ico" />
