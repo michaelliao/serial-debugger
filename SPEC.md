@@ -26,8 +26,8 @@ const Parity[] PARITY_VALUES = { Parity.None, Parity.Even, Parity.Odd, Parity.Ma
 For stop bits, it will list text from `STOP_BITS_TEXTS` and get value from `STOP_BITS_VALUES` by selected index:
 
 ```
-const string[] STOP_BITS_TEXTS = { "None", "1", "1.5", "2" };
-const StopBits[] STOP_BITS_VALUES = { StopBits.None, StopBits.One, StopBits.OnePointFive, StopBits.Two };
+const string[] STOP_BITS_TEXTS = { "1", "1.5", "2" };
+const StopBits[] STOP_BITS_VALUES = { StopBits.One, StopBits.OnePointFive, StopBits.Two };
 ```
 
 ### load user settings
