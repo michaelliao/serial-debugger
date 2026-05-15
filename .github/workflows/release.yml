@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & publish (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore SerialDebugger.csproj
+
+      - name: Publish self-contained single-file exe
+        shell: pwsh
+        run: |
+          dotnet publish SerialDebugger.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=embedded `
+            -o publish
+
+      - name: Rename artifact to SerialDebugger-<tag>.exe
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $dest = "SerialDebugger-$tag.exe"
+          Move-Item -Path "publish\SerialDebugger.exe" -Destination $dest
+          "ARTIFACT=$dest" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          files: ${{ env.ARTIFACT }}
+          generate_release_notes: true
