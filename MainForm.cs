@@ -11,6 +11,9 @@ namespace SerialDebugger
         private static int _uiThreadId;
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
+        private const int DisplayMaxChars = 200_000;
+        private const int DisplayKeepChars = 100_000;
+
         private readonly AppSettings _settings;
         private readonly SerialPort _port = new();
 
@@ -23,9 +26,18 @@ namespace SerialDebugger
         private bool _suspendSettingsSave;
         private bool _suspendInputSync;
 
+        private readonly object _rxLock = new();
+        private readonly Queue<(byte[] Bytes, DateTime Arrived)> _rxQueue = new();
+        private readonly System.Windows.Forms.Timer _displayTimer = new();
+
         public MainForm()
         {
             InitializeComponent();
+
+            // Must stay above DisplayMaxChars, or the edit control truncates
+            // appends before TrimDisplayBox ever runs.
+            textBoxDisplayText.MaxLength = 1_000_000;
+            textBoxDisplayHex.MaxLength = 1_000_000;
 
             _uiThreadId = Environment.CurrentManagedThreadId;
 
@@ -108,7 +120,11 @@ namespace SerialDebugger
             _port.DataReceived += OnPortDataReceived;
             _port.ErrorReceived += OnPortErrorReceived;
 
-            FormClosing += (_, _) => { try { if (_port.IsOpen) _port.Close(); } catch { } };
+            _displayTimer.Interval = 100;
+            _displayTimer.Tick += OnDisplayTimerTick;
+            _displayTimer.Start();
+
+            FormClosing += (_, _) => { _displayTimer.Stop(); try { if (_port.IsOpen) _port.Close(); } catch { } };
         }
 
         // ---------- settings ----------
@@ -328,11 +344,13 @@ namespace SerialDebugger
                 Interlocked.Add(ref _receivedCount, read);
                 Debug.Print($"Received {read} bytes: {HexHelper.FormatHex(buffer)}");
 
-                BeginInvokeSafe(() =>
+                // Never post a UI update per chunk: a continuous RX stream floods the
+                // UI queue with posted messages, which outrank input events and starve
+                // the Send button. Buffer here; _displayTimer drains on the UI thread.
+                lock (_rxLock)
                 {
-                    AppendData(Direction.Received, buffer);
-                    UpdateStatusLabel();
-                });
+                    _rxQueue.Enqueue((buffer, DateTime.Now));
+                }
             }
             catch (Exception ex)
             {
@@ -351,6 +369,25 @@ namespace SerialDebugger
                 ShowError($"Serial port error: {e.EventType}");
                 ClosePort();
             });
+        }
+
+        // WM_TIMER is the lowest-priority message and Windows coalesces timer
+        // messages, so input events are always dispatched before the next drain.
+        private void OnDisplayTimerTick(object? sender, EventArgs e)
+        {
+            (byte[] Bytes, DateTime Arrived)[] chunks;
+            lock (_rxLock)
+            {
+                if (_rxQueue.Count == 0) return;
+                chunks = _rxQueue.ToArray();
+                _rxQueue.Clear();
+            }
+
+            foreach (var chunk in chunks)
+            {
+                AppendData(Direction.Received, chunk.Bytes, chunk.Arrived);
+            }
+            UpdateStatusLabel();
         }
 
         // ---------- input tab conversion ----------
@@ -388,9 +425,9 @@ namespace SerialDebugger
 
         // ---------- display ----------
 
-        private void AppendData(Direction dir, byte[] bytes)
+        private void AppendData(Direction dir, byte[] bytes, DateTime? arrivedAt = null)
         {
-            DateTime now = DateTime.Now;
+            DateTime now = arrivedAt ?? DateTime.Now;
             bool coalesce = dir == _lastDirection &&
                             (now - _lastTimestamp).TotalMilliseconds <= _settings.AutoBreakConf;
 
@@ -420,8 +457,34 @@ namespace SerialDebugger
             textBoxDisplayText.AppendText(textChunk);
             textBoxDisplayHex.AppendText(hexChunk);
 
+            TrimDisplayBox(textBoxDisplayText);
+            TrimDisplayBox(textBoxDisplayHex);
+
             _lastDirection = dir;
             _lastTimestamp = now;
+        }
+
+        // Keeps the log bounded: an unbounded TextBox gets slower with every
+        // append and eats memory.
+        private static void TrimDisplayBox(TextBox box)
+        {
+            if (box.TextLength <= DisplayMaxChars) return;
+
+            string text = box.Text;
+            int cut = text.Length - DisplayKeepChars;
+
+            // Snap to the next record boundary so the kept log starts at a
+            // ">>"/"<<" header instead of a partial line.
+            string separator = Environment.NewLine + Environment.NewLine;
+            int boundary = text.IndexOf(separator, cut, StringComparison.Ordinal);
+            if (boundary >= 0 && boundary + separator.Length < text.Length)
+            {
+                cut = boundary + separator.Length;
+            }
+
+            box.Text = text.Substring(cut);
+            box.SelectionStart = box.TextLength;
+            box.ScrollToCaret();
         }
 
         private void OnClear()
