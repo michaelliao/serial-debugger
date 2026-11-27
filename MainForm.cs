@@ -16,6 +16,7 @@ namespace SerialDebugger
 
         private readonly AppSettings _settings;
         private readonly SerialPort _port = new();
+        private SessionLogger? _logger;
 
         private Direction _lastDirection = Direction.None;
         private DateTime _lastTimestamp;
@@ -47,6 +48,8 @@ namespace SerialDebugger
             _uiThreadId = Environment.CurrentManagedThreadId;
 
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
+            SessionLogger.CleanOldLogs();
 
             _settings = AppSettings.LoadOrCreate();
 
@@ -119,6 +122,7 @@ namespace SerialDebugger
             buttonSend.Click += async (_, _) => await OnSendAsync();
             buttonClear.Click += (_, _) => OnClear();
             labelRefresh.Click += (_, _) => RefreshPortList();
+            linkViewLogs.Click += (_, _) => OpenLogsFolder();
 
             tabControlInput.Selected += OnInputTabSelected;
 
@@ -129,7 +133,7 @@ namespace SerialDebugger
             _displayTimer.Tick += OnDisplayTimerTick;
             _displayTimer.Start();
 
-            FormClosing += (_, _) => { _displayTimer.Stop(); try { if (_port.IsOpen) _port.Close(); } catch { } };
+            FormClosing += (_, _) => { _displayTimer.Stop(); try { if (_port.IsOpen) _port.Close(); } catch { } StopLogging(); };
         }
 
         // ---------- settings ----------
@@ -230,6 +234,8 @@ namespace SerialDebugger
                 _port.WriteTimeout = 500;
                 _port.Open();
 
+                _logger = SessionLogger.Start();
+
                 buttonOpenClose.Text = "Close Port";
                 SetPortSettingsEnabled(false);
                 Debug.Print($"Opened port {_port.PortName} @ {_port.BaudRate} {_port.DataBits}-{_port.Parity}-{_port.StopBits}");
@@ -247,11 +253,32 @@ namespace SerialDebugger
             string name = _port.PortName;
             bool wasOpen = _port.IsOpen;
             try { if (_port.IsOpen) _port.Close(); } catch { /* swallow */ }
+            StopLogging();
             CloseReceivedBurst();
             FlushDisplay();
             buttonOpenClose.Text = "Open Port";
             SetPortSettingsEnabled(true);
             if (wasOpen) Debug.Print($"Closed port {name}");
+        }
+
+        private void StopLogging()
+        {
+            _logger?.Dispose();
+            _logger = null;
+        }
+
+        private void OpenLogsFolder()
+        {
+            try
+            {
+                string dir = SessionLogger.LogDirectory;
+                Directory.CreateDirectory(dir);
+                Process.Start(new ProcessStartInfo(dir) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                ShowError($"Failed to open logs folder: {ex.Message}");
+            }
         }
 
         private void SetPortSettingsEnabled(bool enabled)
@@ -350,6 +377,7 @@ namespace SerialDebugger
                 if (read != buffer.Length) Array.Resize(ref buffer, read);
 
                 Interlocked.Add(ref _receivedCount, read);
+                _logger?.Write(buffer, read);
                 Debug.Print($"Received {read} bytes: {HexHelper.FormatHex(buffer)}");
 
                 // Never post a UI update per chunk: a continuous RX stream floods the

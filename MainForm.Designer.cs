@@ -64,6 +64,7 @@ namespace SerialDebugger
             splitContainer1 = new SplitContainer();
             textBoxDisplayText = new TextBox();
             textBoxDisplayHex = new TextBox();
+            linkViewLogs = new LinkLabel();
             panelLeft.SuspendLayout();
             groupBoxSendSetting.SuspendLayout();
             groupBoxEncoding.SuspendLayout();
@@ -81,6 +82,7 @@ namespace SerialDebugger
             // 
             // panelLeft
             // 
+            panelLeft.Controls.Add(linkViewLogs);
             panelLeft.Controls.Add(buttonOpenClose);
             panelLeft.Controls.Add(groupBoxSendSetting);
             panelLeft.Controls.Add(groupBoxEncoding);
@@ -462,6 +464,16 @@ namespace SerialDebugger
             textBoxDisplayHex.Size = new Size(463, 444);
             textBoxDisplayHex.TabIndex = 1;
             // 
+            // linkViewLogs
+            // 
+            linkViewLogs.AutoSize = true;
+            linkViewLogs.Location = new Point(18, 551);
+            linkViewLogs.Name = "linkViewLogs";
+            linkViewLogs.Size = new Size(64, 17);
+            linkViewLogs.TabIndex = 14;
+            linkViewLogs.TabStop = true;
+            linkViewLogs.Text = "View logs";
+            // 
             // MainForm
             // 
             AutoScaleDimensions = new SizeF(7F, 17F);
@@ -475,6 +487,7 @@ namespace SerialDebugger
             Padding = new Padding(6);
             Text = "Serial Debugger";
             panelLeft.ResumeLayout(false);
+            panelLeft.PerformLayout();
             groupBoxSendSetting.ResumeLayout(false);
             groupBoxEncoding.ResumeLayout(false);
             groupBoxSerialPortSetting.ResumeLayout(false);
@@ -531,5 +544,6 @@ namespace SerialDebugger
         private TextBox textBoxDisplayHex;
         private Button buttonOpenClose;
         private Label labelRefresh;
+        private LinkLabel linkViewLogs;
     }
 }

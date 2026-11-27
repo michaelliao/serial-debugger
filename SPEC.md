@@ -145,3 +145,14 @@ Display text and hex will be updated in a thread-safe way, which means it can be
 Display text and hex will be cleared when user click the "Clear" button.
 
 The display text and hex keep a rolling window of the latest data. When a display box grows beyond 200,000 characters, the oldest records are removed so it keeps about the last 100,000 characters.
+
+### Session Logs
+
+Each time the serial port is opened, two log files are created in the user home directory `~/.serial-debugger/`:
+
+- `YYYYMMDD-hhmmss-tx-plain.log`: the raw bytes received during this session, no timestamps.
+- `YYYYMMDD-hhmmss-tx-hex.log`: the same data in hex format, `A1 B2 C3 ...`, 64 bytes per line.
+
+Example file names: `20261127-150929-tx-plain.log`, `20261127-150929-tx-hex.log`. The timestamp prefix makes files sort by session start time.
+
+On startup, log files older than 30 days are deleted automatically.
