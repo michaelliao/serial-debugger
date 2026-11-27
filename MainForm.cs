@@ -247,6 +247,8 @@ namespace SerialDebugger
             string name = _port.PortName;
             bool wasOpen = _port.IsOpen;
             try { if (_port.IsOpen) _port.Close(); } catch { /* swallow */ }
+            CloseReceivedBurst();
+            FlushDisplay();
             buttonOpenClose.Text = "Open Port";
             SetPortSettingsEnabled(true);
             if (wasOpen) Debug.Print($"Closed port {name}");
@@ -381,20 +383,34 @@ namespace SerialDebugger
         // messages, so input events are always dispatched before the next drain.
         private void OnDisplayTimerTick(object? sender, EventArgs e)
         {
-            (byte[] Bytes, DateTime Arrived)[] chunks;
+            (byte[] Bytes, DateTime Arrived)[] chunks = Array.Empty<(byte[] Bytes, DateTime Arrived)>();
             lock (_rxLock)
             {
-                if (_rxQueue.Count == 0) return;
-                chunks = _rxQueue.ToArray();
-                _rxQueue.Clear();
+                if (_rxQueue.Count > 0)
+                {
+                    chunks = _rxQueue.ToArray();
+                    _rxQueue.Clear();
+                }
             }
 
             foreach (var chunk in chunks)
             {
                 AppendData(Direction.Received, chunk.Bytes, chunk.Arrived);
             }
+
+            // Close a burst once autoBreak has passed with no new data.
+            if (_lastDirection == Direction.Received &&
+                (DateTime.Now - _lastTimestamp).TotalMilliseconds > _settings.AutoBreakConf)
+            {
+                CloseReceivedBurst();
+            }
+
             FlushDisplay();
-            UpdateStatusLabel();
+
+            if (chunks.Length > 0)
+            {
+                UpdateStatusLabel();
+            }
         }
 
         // ---------- input tab conversion ----------
@@ -452,17 +468,32 @@ namespace SerialDebugger
             }
             else
             {
-                string prefix = dir == Direction.Sent ? ">>" : "<<";
+                CloseReceivedBurst();
+
+                string prefix = dir == Direction.Received ? "<< begin: " : ">> ";
                 string separator = (_displayTextChars > 0 || _pendingText.Length > 0)
                     ? Environment.NewLine + Environment.NewLine
                     : string.Empty;
-                string header = $"{separator}{prefix} {now:HH:mm:ss.fff}{Environment.NewLine}";
+                string header = $"{separator}{prefix}{now:HH:mm:ss.fff}{Environment.NewLine}";
                 _pendingText.Append(header).Append(text);
                 _pendingHex.Append(header).Append(hex);
             }
 
             _lastDirection = dir;
             _lastTimestamp = now;
+        }
+
+        // A received burst ends when no chunk arrives within autoBreak, data is
+        // sent, or the port closes. The trailer is stamped with the LAST chunk's
+        // arrival time so begin/end show the burst's true duration.
+        private void CloseReceivedBurst()
+        {
+            if (_lastDirection != Direction.Received) return;
+
+            string trailer = $"{Environment.NewLine}<< end: {_lastTimestamp:HH:mm:ss.fff}";
+            _pendingText.Append(trailer);
+            _pendingHex.Append(trailer);
+            _lastDirection = Direction.None;
         }
 
         // One native AppendText per box per flush, whatever the chunk rate was.

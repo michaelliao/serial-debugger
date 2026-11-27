@@ -98,7 +98,7 @@ When serial port receive data from background thread, it will update the Receive
 ### Display Sent and Received Data
 
 `textBoxDisplayText` and `textBoxDisplayHex` are used to display sent and received data in text and hex format. 
-Time stamp will be added to each sent and received data. Sent data will be prefixed with ">>" and received data will be prefixed with "<<".
+Time stamp will be added to each sent and received data. Sent data will be prefixed with ">>". Each received burst is wrapped by "<< begin: time" and "<< end: time" so it is easy to see how long the burst lasted.
 
 A typical display text format:
 
@@ -106,8 +106,9 @@ A typical display text format:
 >> 09:00:20.123
 Hello
 
-<< 09:02:21.456
+<< begin: 09:02:21.456
 Bye.
+<< end: 09:02:22.100
 ```
 
 A typical display hex format:
@@ -116,8 +117,9 @@ A typical display hex format:
 >> 09:00:20.123
 48 65 6C 6C 6F
 
-<< 09:02:21.456
+<< begin: 09:02:21.456
 42 79 65 2E
+<< end: 09:02:22.100
 ```
 
 Sent and received data are always separated in display text and hex, which means sent data and received data will not be mixed together. This can help user easily distinguish between sent and received data.
@@ -128,6 +130,14 @@ For example, if user send "Hello" and then send "World" in 0.5 second which is l
 ```
 >> 09:00:20.123
 HelloWorld
+```
+
+Chunks that arrive within `autoBreak` of the previous chunk belong to the same received burst. A received burst ends when no new data arrives within `autoBreak`, when data is sent, or when the port is closed. The end time is the arrival time of the last chunk in the burst. For example, a burst that keeps receiving for about 5 seconds:
+
+```
+<< begin: 11:01:48.550
+received-data...
+<< end: 11:01:53.461
 ```
 
 Display text and hex will be updated in a thread-safe way, which means it can be updated from background thread without causing cross-thread operation exception. 
