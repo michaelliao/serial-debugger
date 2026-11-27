@@ -8,46 +8,39 @@ namespace SerialDebugger
     // session start time:
     //   YYYYMMDD-hhmmss-tx-plain.log  raw bytes, no decoration
     //   YYYYMMDD-hhmmss-tx-hex.log    "A1 B2 C3 ..." hex, 64 bytes per line
+    // The files are created lazily on the first received byte, so a session that
+    // receives no data leaves no empty logs behind.
     internal sealed class SessionLogger : IDisposable
     {
         private const int HexBytesPerLine = 64;
         private const int RetentionDays = 30;
 
         private readonly object _lock = new();
-        private readonly FileStream _plain;
-        private readonly FileStream _hex;
+        private readonly string _plainPath;
+        private readonly string _hexPath;
+        private FileStream? _plain;
+        private FileStream? _hex;
         private bool _disposed;
         private int _hexLineBytes;
 
-        private SessionLogger(FileStream plain, FileStream hex)
+        private SessionLogger(string plainPath, string hexPath)
         {
-            _plain = plain;
-            _hex = hex;
+            _plainPath = plainPath;
+            _hexPath = hexPath;
         }
 
         public static string LogDirectory => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".serial-debugger");
 
-        public static SessionLogger? Start()
+        // Names are timestamped at port open; the files themselves appear only
+        // on the first write.
+        public static SessionLogger Start()
         {
-            try
-            {
-                Directory.CreateDirectory(LogDirectory);
-                string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-                return new SessionLogger(
-                    new FileStream(
-                        Path.Combine(LogDirectory, $"{stamp}-tx-plain.log"),
-                        FileMode.Create, FileAccess.Write, FileShare.Read),
-                    new FileStream(
-                        Path.Combine(LogDirectory, $"{stamp}-tx-hex.log"),
-                        FileMode.Create, FileAccess.Write, FileShare.Read));
-            }
-            catch (Exception ex)
-            {
-                Debug.Print($"Session log disabled: {ex.Message}");
-                return null;
-            }
+            string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            return new SessionLogger(
+                Path.Combine(LogDirectory, $"{stamp}-tx-plain.log"),
+                Path.Combine(LogDirectory, $"{stamp}-tx-hex.log"));
         }
 
         public void Write(byte[] buffer, int count)
@@ -57,10 +50,15 @@ namespace SerialDebugger
                 lock (_lock)
                 {
                     if (_disposed) return;
-                    _plain.Write(buffer, 0, count);
-                    WriteHex(buffer, count);
-                    _plain.Flush();
-                    _hex.Flush();
+
+                    EnsureCreated();
+                    FileStream plain = _plain!;
+                    FileStream hex = _hex!;
+
+                    plain.Write(buffer, 0, count);
+                    WriteHex(hex, buffer, count);
+                    plain.Flush();
+                    hex.Flush();
                 }
             }
             catch (Exception ex)
@@ -70,7 +68,16 @@ namespace SerialDebugger
             }
         }
 
-        private void WriteHex(byte[] buffer, int count)
+        private void EnsureCreated()
+        {
+            if (_plain != null) return;
+
+            Directory.CreateDirectory(LogDirectory);
+            _plain = new FileStream(_plainPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+            _hex = new FileStream(_hexPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+        }
+
+        private void WriteHex(FileStream hex, byte[] buffer, int count)
         {
             var sb = new StringBuilder(count * 3 + 2);
             for (int i = 0; i < count; i++)
@@ -84,7 +91,7 @@ namespace SerialDebugger
                 sb.Append(buffer[i].ToString("X2"));
                 _hexLineBytes++;
             }
-            _hex.Write(Encoding.ASCII.GetBytes(sb.ToString()));
+            hex.Write(Encoding.ASCII.GetBytes(sb.ToString()));
         }
 
         public void Dispose()
@@ -93,8 +100,8 @@ namespace SerialDebugger
             {
                 if (_disposed) return;
                 _disposed = true;
-                _plain.Dispose();
-                _hex.Dispose();
+                _plain?.Dispose();
+                _hex?.Dispose();
             }
         }
 
