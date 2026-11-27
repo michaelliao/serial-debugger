@@ -30,6 +30,11 @@ namespace SerialDebugger
         private readonly Queue<(byte[] Bytes, DateTime Arrived)> _rxQueue = new();
         private readonly System.Windows.Forms.Timer _displayTimer = new();
 
+        private readonly StringBuilder _pendingText = new();
+        private readonly StringBuilder _pendingHex = new();
+        private int _displayTextChars;
+        private int _displayHexChars;
+
         public MainForm()
         {
             InitializeComponent();
@@ -294,6 +299,7 @@ namespace SerialDebugger
 
                 Interlocked.Add(ref _sentCount, payload.Length);
                 AppendData(Direction.Sent, payload);
+                FlushDisplay();
                 UpdateStatusLabel();
                 Debug.Print($"Sent {payload.Length} bytes: {HexHelper.FormatHex(payload)}");
             }
@@ -387,6 +393,7 @@ namespace SerialDebugger
             {
                 AppendData(Direction.Received, chunk.Bytes, chunk.Arrived);
             }
+            FlushDisplay();
             UpdateStatusLabel();
         }
 
@@ -425,6 +432,9 @@ namespace SerialDebugger
 
         // ---------- display ----------
 
+        // Pure string building into the pending buffers — no control access, so
+        // the cost per chunk is independent of how much text the boxes already
+        // hold. FlushDisplay moves it into the TextBoxes once per flush.
         private void AppendData(Direction dir, byte[] bytes, DateTime? arrivedAt = null)
         {
             DateTime now = arrivedAt ?? DateTime.Now;
@@ -435,40 +445,53 @@ namespace SerialDebugger
             string text = NormalizeLineBreaksForDisplay(enc.GetString(bytes));
             string hex = HexHelper.FormatHex(bytes);
 
-            string textChunk;
-            string hexChunk;
-
             if (coalesce)
             {
-                textChunk = text;
-                hexChunk = " " + hex;
+                _pendingText.Append(text);
+                _pendingHex.Append(' ').Append(hex);
             }
             else
             {
                 string prefix = dir == Direction.Sent ? ">>" : "<<";
-                string separator = textBoxDisplayText.TextLength > 0
+                string separator = (_displayTextChars > 0 || _pendingText.Length > 0)
                     ? Environment.NewLine + Environment.NewLine
                     : string.Empty;
                 string header = $"{separator}{prefix} {now:HH:mm:ss.fff}{Environment.NewLine}";
-                textChunk = header + text;
-                hexChunk = header + hex;
+                _pendingText.Append(header).Append(text);
+                _pendingHex.Append(header).Append(hex);
             }
-
-            textBoxDisplayText.AppendText(textChunk);
-            textBoxDisplayHex.AppendText(hexChunk);
-
-            TrimDisplayBox(textBoxDisplayText);
-            TrimDisplayBox(textBoxDisplayHex);
 
             _lastDirection = dir;
             _lastTimestamp = now;
         }
 
-        // Keeps the log bounded: an unbounded TextBox gets slower with every
-        // append and eats memory.
-        private static void TrimDisplayBox(TextBox box)
+        // One native AppendText per box per flush, whatever the chunk rate was.
+        private void FlushDisplay()
         {
-            if (box.TextLength <= DisplayMaxChars) return;
+            if (_pendingText.Length > 0)
+            {
+                textBoxDisplayText.AppendText(_pendingText.ToString());
+                _displayTextChars += _pendingText.Length;
+                _pendingText.Clear();
+                _displayTextChars = TrimDisplayBox(textBoxDisplayText, _displayTextChars);
+            }
+
+            if (_pendingHex.Length > 0)
+            {
+                textBoxDisplayHex.AppendText(_pendingHex.ToString());
+                _displayHexChars += _pendingHex.Length;
+                _pendingHex.Clear();
+                _displayHexChars = TrimDisplayBox(textBoxDisplayHex, _displayHexChars);
+            }
+        }
+
+        // Keeps the log bounded: an unbounded TextBox gets slower with every
+        // append and eats memory. charCount is maintained by the caller so the
+        // hot path never reads the box text; the full text is only touched when
+        // a trim is actually due.
+        private static int TrimDisplayBox(TextBox box, int charCount)
+        {
+            if (charCount <= DisplayMaxChars) return charCount;
 
             string text = box.Text;
             int cut = text.Length - DisplayKeepChars;
@@ -482,15 +505,21 @@ namespace SerialDebugger
                 cut = boundary + separator.Length;
             }
 
-            box.Text = text.Substring(cut);
-            box.SelectionStart = box.TextLength;
+            string kept = text.Substring(cut);
+            box.Text = kept;
+            box.SelectionStart = kept.Length;
             box.ScrollToCaret();
+            return kept.Length;
         }
 
         private void OnClear()
         {
             textBoxDisplayText.Clear();
             textBoxDisplayHex.Clear();
+            _pendingText.Clear();
+            _pendingHex.Clear();
+            _displayTextChars = 0;
+            _displayHexChars = 0;
             _lastDirection = Direction.None;
             Interlocked.Exchange(ref _sentCount, 0);
             Interlocked.Exchange(ref _receivedCount, 0);
