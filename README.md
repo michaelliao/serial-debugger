@@ -14,6 +14,7 @@ A lightweight Windows application for debugging serial port communication. Send 
 - Non-blocking send/receive on background threads with thread-safe UI updates
 - Live `SentCount` / `ReceivedCount` status
 - Settings auto-persist to `%AppData%\SerialDebugger\settings.json` and reload on next launch
+- Session logs — each open-port session records the received stream to `~/.serial-debugger/` in raw and hex form; logs older than 30 days are cleaned up on startup
 - Hot-unplug detection — closes the port and notifies you if the device is removed while open
 
 ## Requirements
@@ -117,6 +118,17 @@ A debug build (`dotnet build` or `dotnet run`) does **not** trim, so it always r
 | `48656C6C6F`         | `48 65 6C 6C 6F`                         |
 | `48656C6C6`          | `48 65 6C 6C 06` (trailing nibble = low) |
 | `48656 C6C6F`        | `48 65 06 C6 C6 0F` (whitespace splits)  |
+
+## Session Logs
+
+Every time you open a port, a session log pair is reserved under `~/.serial-debugger/` (your user home directory, e.g. `C:\Users\you\.serial-debugger`). The files are created when the first data is received — opening a port and closing it without any data leaves nothing behind:
+
+- `YYYYMMDD-hhmmss-tx-plain.log` — the raw bytes exactly as received, no timestamps or markers
+- `YYYYMMDD-hhmmss-tx-hex.log` — the same data as hex, `A1 B2 C3 ...`, 64 bytes per line
+
+The timestamp prefix is the port-open time, so files sort chronologically by name and each session's plain/hex pair sits next to each other. The **View logs** link in the left panel opens the folder in Explorer.
+
+On startup, log files older than 30 days are deleted automatically.
 
 ## Settings
 
